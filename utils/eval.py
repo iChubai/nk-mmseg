@@ -27,11 +27,18 @@ def parse_args():
     parser = argparse.ArgumentParser(description='DFormer Evaluation')
     parser.add_argument('--config', required=True, help='config file path')
     parser.add_argument('--continue_fpath', required=True, help='checkpoint file path')
+    parser.add_argument('--strict-load', action='store_true',
+                        help='fail when checkpoint cannot be fully mapped')
     parser.add_argument('--gpus', type=int, default=1, help='number of GPUs')
     parser.add_argument('--dataset', default='nyudepthv2', help='dataset name')
     parser.add_argument('--batch-size', type=int, default=1, help='batch size')
     parser.add_argument('--num-workers', type=int, default=4, help='number of workers')
-    parser.add_argument('--scales', nargs='+', type=float, default=[1.0], help='evaluation scales')
+    parser.add_argument(
+        '--scales',
+        nargs='+',
+        type=float,
+        default=None,
+        help='evaluation scales; when omitted with --multi_scale, defaults to 0.5 0.75 1.0 1.25 1.5')
     parser.add_argument('--multi_scale', action='store_true', help='use multi-scale evaluation')
     parser.add_argument('--flip', action='store_true', help='use flip augmentation')
     parser.add_argument('--sliding', action='store_true', help='use sliding window inference')
@@ -77,7 +84,8 @@ def main():
     # Load checkpoint
     if args.continue_fpath:
         print(f"Loading checkpoint from {args.continue_fpath}")
-        model = load_model(model, args.continue_fpath)
+        model = load_model(
+            model, args.continue_fpath, strict=args.strict_load)
     
     model.eval()
     
@@ -94,7 +102,7 @@ def main():
         # Multi-scale evaluation with flip and/or sliding window
         if args.multi_scale:
             # Prefer user-specified scales if provided, else fallback to default 5-scale
-            scales = args.scales if args.scales and len(args.scales) > 0 else [0.5, 0.75, 1.0, 1.25, 1.5]
+            scales = args.scales if args.scales else [0.5, 0.75, 1.0, 1.25, 1.5]
         else:
             scales = [1.0]  # Single scale
 

@@ -98,6 +98,10 @@ pip install jittor
 pip install opencv-python pillow numpy scipy tqdm tensorboardX tabulate easydict
 ```
 
+运行时兼容性说明：
+- 建议使用 `numpy<2`（推荐 `1.26.4`）搭配 `jittor==1.3.10.x`。
+- 在当前技术栈中，`numpy>=2` 可能导致张量转换异常与权重加载失真。
+
 ### 数据集准备
 
 支持的数据集：
@@ -130,6 +134,7 @@ DFormer-Jittor/
 │   ├── NYUDepthv2/         # NYU 数据集
 │   └── SUNRGBD/            # SUNRGBD 数据集
 ├── local_configs/          # 配置文件
+├── configs/dformer/        # mmengine 风格 DFormer/DFormerv2 配置
 ├── models/                 # 模型定义
 ├── utils/                  # 工具函数
 ├── train.sh               # 训练脚本
@@ -141,6 +146,11 @@ DFormer-Jittor/
 
 ### 训练
 
+推荐统一入口（同时兼容 `local_configs` 与 `configs/*`）：
+```bash
+python tools/train.py --config configs/dformer/dformer_large_8xb8-500e_nyudepthv2-480x640.py
+```
+
 使用提供的训练脚本：
 ```bash
 bash train.sh
@@ -151,7 +161,37 @@ bash train.sh
 python utils/train.py --config local_configs.NYUDepthv2.DFormer_Base
 ```
 
+快速 smoke（1 step 训练 + 限制验证迭代）：
+```bash
+export CUDA_HOME=/usr/local/cuda-11.4
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+python utils/train.py \
+  --config local_configs.NYUDepthv2.DFormer_Large \
+  --epochs 10 \
+  --max-iters 1 \
+  --max-val-iters 1 \
+  --batch-size-override 1 \
+  --num-workers-override 0 \
+  --gpus 1 --no-mst --no-amp --no-val_amp --no-sliding --no-syncbn
+```
+
+mmengine 配置 smoke：
+```bash
+python tools/train.py \
+  --config configs/dformer/dformer_large_8xb8-500e_nyudepthv2-480x640.py \
+  --cfg-options train_cfg.max_iters=1 train_cfg.val_interval=1 train_dataloader.batch_size=1 train_dataloader.dataset.file_length=1 val_dataloader.batch_size=1 val_dataloader.dataset.file_length=1
+```
+
 ### 评估
+
+推荐统一入口：
+```bash
+python tools/test.py \
+  --config configs/dformer/dformer_large_8xb8-500e_nyudepthv2-480x640.py \
+  --mode val \
+  --cfg-options val_dataloader.batch_size=1 val_dataloader.dataset.file_length=1
+```
 
 ```bash
 bash eval.sh
@@ -166,6 +206,81 @@ python utils/eval.py --config local_configs.NYUDepthv2.DFormer_Base --checkpoint
 
 ```bash
 bash infer.sh
+```
+
+### mmseg-Jittor 框架源码（训练/推理）
+
+仓库新增了 `mmseg/` 目录，提供了 Jittor 版的 mmseg 框架层（`registry / engine / apis / structures / visualization`），用于承接从 `mmsegmentation` 迁移的训练推理架构源码。
+
+主要入口：
+
+```bash
+# mmseg 风格 API 推理
+python tools/mmseg_infer.py \
+  --config local_configs.NYUDepthv2.DFormer_Large \
+  --checkpoint checkpoints/trained/NYUv2_DFormer_Large.pth \
+  --img /path/to/rgb.png \
+  --modal-x /path/to/depth.png \
+  --out-file output/vis.png
+```
+
+### 精准复现 DFormer / DFormerv2 分数
+
+可直接复用 `DFormer-Jittor` 中的数据与权重，并按论文评测设置（`multi_scale + flip + sliding`）运行：
+
+```bash
+bash tools/reproduce_dformer_scores.sh
+```
+
+说明：`utils/jt_utils.py` 已支持直接读取 PyTorch `.pth/.pt/.pth.tar` 权重（无需安装 torch 运行框架），会自动做关键参数名映射后加载到 Jittor 模型。
+
+可选环境变量：
+
+```bash
+DFORMER_ROOT=/defaultShare/archive/yinbowen/Houjd/DFormer-Jittor \
+PYTHON_BIN=python \
+GPUS=1 \
+bash tools/reproduce_dformer_scores.sh
+```
+
+### 迁移审计（Migration Audit）
+
+可运行快速迁移健康检查（构建 + 加载 + 前向 + 可选小样本评测）：
+
+```bash
+python tools/migration_audit.py --eval-samples 5
+```
+
+可选：
+
+```bash
+python tools/migration_audit.py --cases dformer_l_nyu dformerv2_l_nyu --eval-samples 20
+```
+
+### 兼容性 Smoke 检查
+
+运行仓库级兼容性检查（包导入审计 + 主干前向 smoke）：
+
+```bash
+python tools/compat_smoke.py
+```
+
+运行 mmengine-runner smoke（训练/验证/hook/scheduler/checkpoint 集成）：
+
+```bash
+python tools/mmengine_runner_smoke.py
+```
+
+运行解码头兼容性 smoke（PSA/CC/Point head 与 mmcv-jittor 层）：
+
+```bash
+python tools/mmseg_heads_smoke.py
+```
+
+运行 mmseg API smoke（`init_model/inference_model/MMSegInferencer`）：
+
+```bash
+python tools/mmseg_api_smoke.py
 ```
 
 ## 🚩 性能

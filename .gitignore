@@ -1,0 +1,74 @@
+# Python bytecode and extensions
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Build / packaging
+.Python
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+wheels/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Test / coverage / type check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Jupyter / IDE / OS
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Virtual environments
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Local runtime outputs
+work_dirs/
+logs/
+results/
+output/
+tmp/
+temp/
+*.log
+*.log.*
+
+# Large local data / checkpoints (usually symlinked in this repo)
+datasets/
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.pkl
+*.npz
+
+# Docs/site build
+site/
+docs/_build/
+
+# mmseg helper artifacts
+mmseg/.mim
+

@@ -41,7 +41,7 @@ class TestLossFunctions(unittest.TestCase):
             loss = loss_fn(self.predictions, self.targets)
             
             self.assertIsInstance(loss, jt.Var)
-            self.assertEqual(loss.ndim, 0)  # scalar loss
+            self.assertEqual(loss.numel(), 1)  # scalar-like loss
             self.assertGreater(loss.item(), 0)
             
             print("✓ Cross entropy loss test passed")
@@ -80,7 +80,7 @@ class TestLossFunctions(unittest.TestCase):
             loss = loss_fn(binary_predictions, binary_targets)
             
             self.assertIsInstance(loss, jt.Var)
-            self.assertEqual(loss.ndim, 0)  # scalar loss
+            self.assertEqual(loss.numel(), 1)  # scalar-like loss
             self.assertGreater(loss.item(), 0)
             
             print("✓ Focal loss test passed")
@@ -100,8 +100,8 @@ class TestLossFunctions(unittest.TestCase):
             loss_none = loss_fn_none(self.predictions, self.targets)
             
             # Check shapes
-            self.assertEqual(loss_mean.ndim, 0)  # scalar
-            self.assertEqual(loss_sum.ndim, 0)   # scalar
+            self.assertEqual(loss_mean.numel(), 1)  # scalar-like
+            self.assertEqual(loss_sum.numel(), 1)   # scalar-like
             self.assertEqual(loss_none.shape, (self.batch_size, self.height, self.width))  # per-pixel
             
             # Check values
@@ -158,13 +158,13 @@ class TestLossUtilities(unittest.TestCase):
             reduced_loss_mean = weight_reduce_loss(
                 self.loss_tensor, self.weights, reduction='mean'
             )
-            self.assertEqual(reduced_loss_mean.ndim, 0)
+            self.assertEqual(reduced_loss_mean.numel(), 1)
             
             # Test sum reduction
             reduced_loss_sum = weight_reduce_loss(
                 self.loss_tensor, self.weights, reduction='sum'
             )
-            self.assertEqual(reduced_loss_sum.ndim, 0)
+            self.assertEqual(reduced_loss_sum.numel(), 1)
             
             # Test none reduction
             reduced_loss_none = weight_reduce_loss(

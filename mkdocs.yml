@@ -1,0 +1,47 @@
+# MkDocs configuration for nk-mmseg
+# Compatible with Read the Docs
+site_name: nk-mmseg
+site_description: DFormer/DFormerv2 RGBD Semantic Segmentation (Jittor Implementation)
+site_url: https://nk-mmseg.readthedocs.io
+repo_url: https://github.com/VCIP-RGBD/DFormer-Jittor
+repo_name: DFormer-Jittor
+edit_uri: edit/master/docs/
+
+theme:
+  name: readthedocs
+  language: zh
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - toc.integrate
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed
+  - admonition
+  - tables
+
+docs_dir: docs
+nav:
+  - 首页: index.md
+  - 安装: installation.md
+  - 快速开始: quickstart.md
+  - 用户指南:
+    - 数据集准备: guides/dataset.md
+    - 训练: guides/training.md
+    - 评测: guides/evaluation.md
+    - 推理与可视化: guides/inference.md
+  - 配置参考: configuration.md
+  - 模型库: model_zoo.md
+  - 架构说明: architecture.md
+  - Jittor 迁移手册: migration.md
+  - 故障排除: troubleshooting.md
+  - API 概览: api_overview.md

@@ -6,6 +6,7 @@ import jittor as jt
 import re
 import os
 import pickle
+from utils.jt_utils import _load_checkpoint_any, check_runtime_compatibility
 
 
 def get_dist_info():
@@ -101,16 +102,12 @@ def load_pretrain(model, filename, strict=False, revise_keys=[(r"^module\.", "")
     """
     if not os.path.exists(filename):
         raise FileNotFoundError(f"Checkpoint file not found: {filename}")
+
+    check_runtime_compatibility(raise_on_error=True)
     
-    # Load checkpoint
-    if filename.endswith('.pkl') or filename.endswith('.pth'):
-        try:
-            # Try to load as Jittor checkpoint
-            checkpoint = jt.load(filename)
-        except:
-            # Fall back to pickle
-            with open(filename, 'rb') as f:
-                checkpoint = pickle.load(f)
+    # Load checkpoint with Jittor + torch-zip fallback.
+    if filename.endswith('.pkl') or filename.endswith('.pth') or filename.endswith('.pt') or filename.endswith('.pth.tar'):
+        checkpoint, _ = _load_checkpoint_any(filename)
     else:
         raise ValueError(f"Unsupported checkpoint format: {filename}")
     
@@ -163,33 +160,9 @@ def save_checkpoint(model, filename, epoch=None, optimizer=None, **kwargs):
 
 
 def convert_pytorch_to_jittor(pytorch_path, jittor_path):
-    """Convert PyTorch checkpoint to Jittor format.
-    
-    Args:
-        pytorch_path: Path to PyTorch checkpoint
-        jittor_path: Path to save Jittor checkpoint
-    """
-    import torch
-    
-    # Load PyTorch checkpoint
-    checkpoint = torch.load(pytorch_path, map_location='cpu')
-    
-    # Convert tensors to numpy arrays for Jittor
-    if isinstance(checkpoint, dict):
-        converted = {}
-        for key, value in checkpoint.items():
-            if isinstance(value, torch.Tensor):
-                converted[key] = value.detach().cpu().numpy()
-            elif isinstance(value, dict):
-                converted[key] = {k: v.detach().cpu().numpy() if isinstance(v, torch.Tensor) else v 
-                                 for k, v in value.items()}
-            else:
-                converted[key] = value
-        checkpoint = converted
-    
-    # Save as Jittor checkpoint
+    """Convert checkpoint by loading/saving with Jittor only."""
+    check_runtime_compatibility(raise_on_error=True)
+    checkpoint, _ = _load_checkpoint_any(pytorch_path)
     os.makedirs(os.path.dirname(jittor_path), exist_ok=True)
-    with open(jittor_path, 'wb') as f:
-        pickle.dump(checkpoint, f)
-    
-    print(f"Converted PyTorch checkpoint to Jittor format: {jittor_path}") 
+    jt.save(checkpoint, jittor_path)
+    print(f"Converted checkpoint to Jittor format: {jittor_path}")

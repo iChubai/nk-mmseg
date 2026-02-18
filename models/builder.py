@@ -3,6 +3,9 @@ from jittor import nn
 import jittor.nn as F
 from typing import List, Optional, Dict, Any
 import warnings
+import os
+
+_LABEL_NOT_GIVEN = object()
 
 
 class EncoderDecoder(nn.Module):
@@ -115,8 +118,34 @@ class EncoderDecoder(nn.Module):
         """Initialize the weights in backbone."""
         if pretrained is not None:
             print(f"Loading pretrained model from {pretrained}")
-            # TODO: implement loading pretrained weights
-            pass
+            if not os.path.isfile(pretrained):
+                warnings.warn(f"Pretrained file not found: {pretrained}")
+                return
+            try:
+                from utils.jt_utils import (
+                    _extract_state_dict,
+                    _load_checkpoint_any,
+                    _load_state_dict_arrays,
+                    check_runtime_compatibility,
+                )
+
+                check_runtime_compatibility(raise_on_error=True)
+                checkpoint_obj, source = _load_checkpoint_any(pretrained)
+                state_dict = _extract_state_dict(checkpoint_obj)
+                _, stats = _load_state_dict_arrays(
+                    self.backbone, state_dict, verbose=False, return_stats=True)
+                print(
+                    "Backbone pretrained load summary: "
+                    f"source={source}, loaded={stats['loaded_count']}, "
+                    f"skipped={stats['skipped_count']}, "
+                    f"shape_mismatch={stats['shape_mismatch_count']}"
+                )
+                if stats['loaded_count'] == 0:
+                    warnings.warn(
+                        f"No backbone params were loaded from pretrained file: {pretrained}"
+                    )
+            except Exception as e:
+                warnings.warn(f"Failed to load pretrained model {pretrained}: {e}")
 
     def encode_decode(self, rgb, modal_x):
         """Encode images with backbone and decode into a semantic segmentation map."""
@@ -141,10 +170,28 @@ class EncoderDecoder(nn.Module):
 
         return out
 
-    def execute(self, rgb, modal_x=None, label=None):
+    def execute(self, rgb, modal_x=None, label=_LABEL_NOT_GIVEN, **kwargs):
         """Execute function."""
+        if isinstance(rgb, dict):
+            batch = rgb
+            rgb = batch.get('data', batch.get('inputs', None))
+            if modal_x is None:
+                modal_x = batch.get('modal_x', None)
+            if label is _LABEL_NOT_GIVEN:
+                label = batch.get('label', _LABEL_NOT_GIVEN)
+
         # Get prediction
         pred = self.encode_decode(rgb, modal_x)
+
+        # Two-argument inference style: return logits tensor directly.
+        if label is _LABEL_NOT_GIVEN:
+            return pred
+
+        # MM-style inference mode flag compatibility.
+        mode = kwargs.get('mode', None)
+        phase = kwargs.get('phase', None)
+        if mode == 'predict' or phase == 'predict':
+            return pred
 
         if self.training and label is not None:
             # Compute loss
@@ -164,9 +211,9 @@ class EncoderDecoder(nn.Module):
         else:
             return [pred], None
 
-    def forward(self, rgb, modal_x=None, label=None):
+    def forward(self, rgb, modal_x=None, label=_LABEL_NOT_GIVEN, **kwargs):
         """Forward function for compatibility."""
-        return self.execute(rgb, modal_x, label)
+        return self.execute(rgb, modal_x, label, **kwargs)
 
 
 class Config:

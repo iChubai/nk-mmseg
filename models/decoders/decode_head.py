@@ -119,7 +119,7 @@ class ConvModule(nn.Module):
         padding: Union[int, Tuple[int, int]] = 0,
         dilation: Union[int, Tuple[int, int]] = 1,
         groups: int = 1,
-        bias: bool = True,
+        bias: Union[bool, str] = 'auto',
         conv_cfg: Optional[dict] = None,
         norm_cfg: Optional[dict] = None,
         act_cfg: Optional[dict] = dict(type='ReLU'),
@@ -129,7 +129,16 @@ class ConvModule(nn.Module):
         order: Tuple[str, ...] = ('conv', 'norm', 'act')
     ):
         super(ConvModule, self).__init__()
-        
+        del conv_cfg, inplace, with_spectral_norm, padding_mode
+        self.order = tuple(order) if order is not None else ('conv', 'norm', 'act')
+        self.with_norm = norm_cfg is not None
+        self.with_activation = act_cfg is not None
+
+        if bias == 'auto':
+            conv_bias = not self.with_norm
+        else:
+            conv_bias = bool(bias)
+
         # Build conv layer
         self.conv = nn.Conv2d(
             in_channels,
@@ -139,22 +148,26 @@ class ConvModule(nn.Module):
             padding=padding,
             dilation=dilation,
             groups=groups,
-            bias=bias
+            bias=conv_bias
         )
-        
+
         # Build norm layer
-        if norm_cfg is not None:
+        self.norm = None
+        if self.with_norm:
+            norm_channels = out_channels
+            if 'norm' in self.order and 'conv' in self.order:
+                if self.order.index('norm') < self.order.index('conv'):
+                    norm_channels = in_channels
             if norm_cfg.get('type') == 'BN':
-                self.norm = nn.BatchNorm2d(out_channels)
+                self.norm = nn.BatchNorm2d(norm_channels)
             elif norm_cfg.get('type') == 'SyncBN':
-                self.norm = nn.BatchNorm2d(out_channels)
+                self.norm = nn.BatchNorm2d(norm_channels)
             else:
-                self.norm = nn.BatchNorm2d(out_channels)
-        else:
-            self.norm = None
-        
+                self.norm = nn.BatchNorm2d(norm_channels)
+
         # Build activation layer
-        if act_cfg is not None:
+        self.activate = None
+        if self.with_activation:
             if act_cfg.get('type') == 'ReLU':
                 self.activate = nn.ReLU()
             elif act_cfg.get('type') == 'GELU':
@@ -163,16 +176,16 @@ class ConvModule(nn.Module):
                 self.activate = nn.LeakyReLU(0.01)
             else:
                 self.activate = nn.ReLU()
-        else:
-            self.activate = None
 
     def execute(self, x: jt.Var) -> jt.Var:
         """Execute function."""
-        x = self.conv(x)
-        if self.norm is not None:
-            x = self.norm(x)
-        if self.activate is not None:
-            x = self.activate(x)
+        for op in self.order:
+            if op == 'conv':
+                x = self.conv(x)
+            elif op == 'norm' and self.norm is not None:
+                x = self.norm(x)
+            elif op == 'act' and self.activate is not None:
+                x = self.activate(x)
         return x
 
 

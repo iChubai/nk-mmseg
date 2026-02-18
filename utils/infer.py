@@ -100,90 +100,12 @@ with Engine(custom_parser=parser) as engine:
 
     model = segmodel(cfg=config, norm_layer=BatchNorm2d)
     
-    # Load model weights - Jittor can directly load PyTorch checkpoints
+    # Load checkpoint in pure Jittor path.
     if args.continue_fpath:
         logger.info(f"Loading checkpoint from {args.continue_fpath}")
         try:
-            # Load PyTorch checkpoint and get the state_dict
-            import torch
-            checkpoint = torch.load(args.continue_fpath, map_location='cpu')
-
-            # In case the checkpoint is nested, e.g., {'model': state_dict}
-            if 'model' in checkpoint:
-                weight = checkpoint['model']
-            else:
-                weight = checkpoint
-
-            # Create key mapping for PyTorch to Jittor conversion
-            def convert_pytorch_keys_to_jittor(pytorch_state_dict):
-                """Convert PyTorch checkpoint keys to Jittor model keys."""
-                jittor_state_dict = {}
-
-                for k, v in pytorch_state_dict.items():
-                    new_key = k
-
-                    # Convert PyTorch tensor to numpy array for Jittor
-                    if hasattr(v, 'detach'):
-                        v = v.detach().cpu().numpy()
-
-                    # Key mappings for decode_head
-                    if 'decode_head.conv_seg' in k:
-                        new_key = k.replace('decode_head.conv_seg', 'decode_head.cls_seg')
-                    elif 'decode_head.squeeze.bn' in k:
-                        new_key = k.replace('decode_head.squeeze.bn', 'decode_head.squeeze.norm')
-                    elif 'decode_head.hamburger.ham_out.bn' in k:
-                        new_key = k.replace('decode_head.hamburger.ham_out.bn', 'decode_head.hamburger.ham_out.norm')
-                    elif 'decode_head.align.bn' in k:
-                        new_key = k.replace('decode_head.align.bn', 'decode_head.align.norm')
-
-                    # Handle DFormerv2 LayerScale parameters: gamma_1 -> gamma1, gamma_2 -> gamma2
-                    if 'gamma_1' in new_key:
-                        new_key = new_key.replace('gamma_1', 'gamma1')
-                    elif 'gamma_2' in new_key:
-                        new_key = new_key.replace('gamma_2', 'gamma2')
-
-                    # Skip num_batches_tracked keys as they are not needed in Jittor
-                    if 'num_batches_tracked' in k:
-                        continue
-
-                    # Skip backbone norm keys that don't exist in Jittor model
-                    if any(x in k for x in ['backbone.norm0', 'backbone.norm1', 'backbone.norm2', 'backbone.norm3']):
-                        continue
-
-                    jittor_state_dict[new_key] = v
-
-                return jittor_state_dict
-
-            # Convert PyTorch keys to Jittor keys
-            converted_weight = convert_pytorch_keys_to_jittor(weight)
-
-            # Non-strict loading of parameters
-            model_dict = model.state_dict()
-
-            # Filter checkpoint weights to match model keys
-            load_dict = {k: v for k, v in converted_weight.items() if k in model_dict}
-
-            # Convert numpy arrays to Jittor tensors and load
-            jittor_load_dict = {}
-            for k, v in load_dict.items():
-                if isinstance(v, np.ndarray):
-                    jittor_load_dict[k] = jt.array(v)
-                else:
-                    jittor_load_dict[k] = v
-
-            # Load parameters into model
-            model.load_parameters(jittor_load_dict)
-
-            missing_keys = [k for k in model_dict.keys() if k not in converted_weight]
-            unexpected_keys = [k for k in converted_weight.keys() if k not in model_dict]
-
-            if missing_keys:
-                logger.warning(f"Missing keys in checkpoint: {missing_keys}")
-            if unexpected_keys:
-                logger.warning(f"Unexpected keys in checkpoint: {unexpected_keys}")
-
+            model = load_model(model, args.continue_fpath)
             logger.info("Model weights loaded successfully")
-
         except Exception as e:
             logger.error(f"Failed to load checkpoint: {e}")
             logger.warning("Continuing with random initialization")

@@ -32,44 +32,46 @@ def cross_entropy(
         ignore_index (int): Specifies a target value that is ignored.
         avg_non_ignore (bool): Whether the loss is only averaged over non-ignored targets.
     """
-    # Apply cross entropy loss
-    loss = nn.cross_entropy_loss(pred, label, ignore_index=ignore_index)
-    
-    # Apply class weights if provided
+    loss = nn.cross_entropy_loss(
+        pred, label, ignore_index=ignore_index, reduction='none')
+
+    valid_mask = None
+    if ignore_index is not None:
+        valid_mask = (label != ignore_index).float32()
+        loss = loss * valid_mask
+
     if class_weight is not None:
-        if isinstance(class_weight, list):
+        if not isinstance(class_weight, jt.Var):
             class_weight = jt.array(class_weight).float32()
-        
-        # Expand class weights to match prediction shape
-        if len(pred.shape) == 4:  # (N, C, H, W)
-            N, C, H, W = pred.shape
-            class_weight = class_weight.view(1, C, 1, 1).expand(N, C, H, W)
-        
-        # Apply weights
-        pred_softmax = nn.softmax(pred, dim=1)
-        weighted_pred = pred_softmax * class_weight
-        loss = nn.cross_entropy_loss(weighted_pred, label, ignore_index=ignore_index)
-    
-    # Apply sample weights and reduction
+        else:
+            class_weight = class_weight.float32()
+        label_clamped = jt.clamp(label.int32(), 0, int(class_weight.shape[0]) - 1)
+        pixel_weight = class_weight[label_clamped]
+        if valid_mask is not None:
+            pixel_weight = pixel_weight * valid_mask
+        loss = loss * pixel_weight
+
     if weight is not None:
         loss = loss * weight
-    
-    if reduction == "mean":
-        if avg_non_ignore and ignore_index is not None:
-            # Average over non-ignored elements
-            valid_mask = (label != ignore_index)
-            if valid_mask.sum() > 0:
-                loss = loss.sum() / valid_mask.sum()
-            else:
-                loss = loss.mean()
-        else:
-            loss = loss.mean()
-    elif reduction == "sum":
-        loss = loss.sum()
-    elif reduction == "none":
-        pass  # Keep original shape
-    
-    return loss
+
+    if reduction == 'none':
+        return loss
+
+    if reduction == 'sum':
+        return loss.sum()
+
+    if reduction != 'mean':
+        raise ValueError(f'Unsupported reduction: {reduction}')
+
+    if avg_factor is not None:
+        return weight_reduce_loss(
+            loss, weight=None, reduction='mean', avg_factor=avg_factor)
+
+    if avg_non_ignore and valid_mask is not None:
+        denom = valid_mask.sum()
+        return loss.sum() / (denom + jt.finfo(jt.float32).eps)
+
+    return loss.mean()
 
 
 def binary_cross_entropy(
@@ -94,27 +96,51 @@ def binary_cross_entropy(
         ignore_index (int): Specifies a target value that is ignored.
         avg_non_ignore (bool): Whether the loss is only averaged over non-ignored targets.
     """
-    # Convert to binary classification format
-    if pred.shape[1] > 1:
-        # Multi-class to binary
-        pred = nn.sigmoid(pred)
-    
-    # Create binary labels
-    binary_label = (label != ignore_index).float32()
-    
-    # Apply binary cross entropy
-    loss = nn.binary_cross_entropy_with_logits(pred.squeeze(1), binary_label)
-    
-    # Apply weights and reduction
+    if label.ndim + 1 == pred.ndim and pred.shape[1] == 1:
+        label = label.unsqueeze(1)
+    label = label.float32()
+
+    valid_mask = None
+    if ignore_index is not None:
+        valid_mask = (label != float(ignore_index)).float32()
+        # Safe target for ignored positions before masking.
+        label = jt.where(valid_mask > 0, label, jt.zeros_like(label))
+
+    loss = nn.binary_cross_entropy_with_logits(pred, label, reduction='none')
+
+    if class_weight is not None:
+        if not isinstance(class_weight, jt.Var):
+            class_weight = jt.array(class_weight).float32()
+        if class_weight.numel() == 1:
+            loss = loss * class_weight
+        elif class_weight.numel() >= 2:
+            pos_w = class_weight[-1]
+            neg_w = class_weight[0]
+            loss = loss * (pos_w * label + neg_w * (1.0 - label))
+
+    if valid_mask is not None:
+        loss = loss * valid_mask
     if weight is not None:
         loss = loss * weight
-    
-    if reduction == "mean":
-        loss = loss.mean()
-    elif reduction == "sum":
-        loss = loss.sum()
-    
-    return loss
+
+    if reduction == 'none':
+        return loss
+
+    if reduction == 'sum':
+        return loss.sum()
+
+    if reduction != 'mean':
+        raise ValueError(f'Unsupported reduction: {reduction}')
+
+    if avg_factor is not None:
+        return weight_reduce_loss(
+            loss, weight=None, reduction='mean', avg_factor=avg_factor)
+
+    if avg_non_ignore and valid_mask is not None:
+        denom = valid_mask.sum()
+        return loss.sum() / (denom + jt.finfo(jt.float32).eps)
+
+    return loss.mean()
 
 
 class CrossEntropyLoss(nn.Module):
@@ -171,8 +197,11 @@ class CrossEntropyLoss(nn.Module):
             ignore_index = self.ignore_index
 
         if self.class_weight is not None:
-            class_weight = cls_score.new_tensor(
-                self.class_weight, dtype=jt.float32)
+            class_weight = self.class_weight
+            if not isinstance(class_weight, jt.Var):
+                class_weight = jt.array(class_weight).float32()
+            else:
+                class_weight = class_weight.float32()
         else:
             class_weight = None
 
@@ -214,5 +243,6 @@ def mask_cross_entropy(pred,
     num_rois = pred.size()[0]
     inds = jt.arange(0, num_rois, dtype=jt.int64)
     pred_slice = pred[inds, label].squeeze(1)
-    return nn.binary_cross_entropy_with_logits(
-        pred_slice, target, weight=class_weight, reduction=reduction)[None]
+    loss = nn.binary_cross_entropy_with_logits(
+        pred_slice, target, weight=class_weight, reduction=reduction)
+    return loss

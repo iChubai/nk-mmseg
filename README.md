@@ -114,6 +114,10 @@ pip install jittor
 pip install opencv-python pillow numpy scipy tqdm tensorboardX tabulate easydict
 ```
 
+Runtime compatibility note:
+- Use `numpy<2` (recommended `1.26.4`) with `jittor==1.3.10.x`.
+- `numpy>=2` may cause corrupted tensor conversion and broken checkpoint loading in this stack.
+
 ### Dataset Preparation
 
 Supported datasets:
@@ -146,6 +150,7 @@ DFormer-Jittor/
 │   ├── NYUDepthv2/         # NYU dataset
 │   └── SUNRGBD/            # SUNRGBD dataset
 ├── local_configs/          # Configuration files
+├── configs/dformer/        # mmengine-style DFormer/DFormerv2 configs
 ├── models/                 # Model definitions
 ├── utils/                  # Utility functions
 ├── train.sh               # Training script
@@ -157,6 +162,11 @@ DFormer-Jittor/
 
 ### Training
 
+Recommended unified entry (`local_configs` and `configs/*` are both supported):
+```bash
+python tools/train.py --config configs/dformer/dformer_large_8xb8-500e_nyudepthv2-480x640.py
+```
+
 Use the provided training script:
 ```bash
 bash train.sh
@@ -167,7 +177,37 @@ Or use the Python command directly:
 python utils/train.py --config local_configs.NYUDepthv2.DFormer_Base
 ```
 
+Quick smoke run (1 step train + limited eval):
+```bash
+export CUDA_HOME=/usr/local/cuda-11.4
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+python utils/train.py \
+  --config local_configs.NYUDepthv2.DFormer_Large \
+  --epochs 10 \
+  --max-iters 1 \
+  --max-val-iters 1 \
+  --batch-size-override 1 \
+  --num-workers-override 0 \
+  --gpus 1 --no-mst --no-amp --no-val_amp --no-sliding --no-syncbn
+```
+
+mmengine-config smoke run:
+```bash
+python tools/train.py \
+  --config configs/dformer/dformer_large_8xb8-500e_nyudepthv2-480x640.py \
+  --cfg-options train_cfg.max_iters=1 train_cfg.val_interval=1 train_dataloader.batch_size=1 train_dataloader.dataset.file_length=1 val_dataloader.batch_size=1 val_dataloader.dataset.file_length=1
+```
+
 ### Evaluation
+
+Recommended unified entry:
+```bash
+python tools/test.py \
+  --config configs/dformer/dformer_large_8xb8-500e_nyudepthv2-480x640.py \
+  --mode val \
+  --cfg-options val_dataloader.batch_size=1 val_dataloader.dataset.file_length=1
+```
 
 ```bash
 bash eval.sh
@@ -182,6 +222,80 @@ python utils/eval.py --config local_configs.NYUDepthv2.DFormer_Base --checkpoint
 
 ```bash
 bash infer.sh
+```
+
+### mmseg-Jittor Framework Source (Train/Inference)
+
+This repo now includes a `mmseg/` package with Jittor-native framework layers (`registry / engine / apis / structures / visualization`) for the converted mmseg-style train/infer architecture.
+
+Main entry:
+
+```bash
+python tools/mmseg_infer.py \
+  --config local_configs.NYUDepthv2.DFormer_Large \
+  --checkpoint checkpoints/trained/NYUv2_DFormer_Large.pth \
+  --img /path/to/rgb.png \
+  --modal-x /path/to/depth.png \
+  --out-file output/vis.png
+```
+
+### Reproduce DFormer / DFormerv2 Scores
+
+You can reuse dataset/checkpoints from `DFormer-Jittor` and run paper-style eval settings (`multi_scale + flip + sliding`) via:
+
+```bash
+bash tools/reproduce_dformer_scores.sh
+```
+
+Note: `utils/jt_utils.py` now supports direct loading of PyTorch `.pth/.pt/.pth.tar` checkpoints (no torch runtime dependency), with automatic key mapping before loading into Jittor models.
+
+Optional env vars:
+
+```bash
+DFORMER_ROOT=/defaultShare/archive/yinbowen/Houjd/DFormer-Jittor \
+PYTHON_BIN=python \
+GPUS=1 \
+bash tools/reproduce_dformer_scores.sh
+```
+
+### Migration Audit
+
+Run a quick migration health check (build + load + forward + optional mini-eval):
+
+```bash
+python tools/migration_audit.py --eval-samples 5
+```
+
+Optional:
+
+```bash
+python tools/migration_audit.py --cases dformer_l_nyu dformerv2_l_nyu --eval-samples 20
+```
+
+### Compatibility Smoke
+
+Run repository-level compatibility checks (package import audit + backbone forward smoke):
+
+```bash
+python tools/compat_smoke.py
+```
+
+Run mmengine-runner smoke (train/val/hook/scheduler/checkpoint integration):
+
+```bash
+python tools/mmengine_runner_smoke.py
+```
+
+Run decode-head compatibility smoke (PSA/CC/Point heads via mmcv-jittor layers):
+
+```bash
+python tools/mmseg_heads_smoke.py
+```
+
+Run mmseg API smoke (`init_model/inference_model/MMSegInferencer`):
+
+```bash
+python tools/mmseg_api_smoke.py
 ```
 
 ## 🚩 Performance
@@ -318,4 +432,3 @@ Thanks to all the contributors for their efforts!
 This project is for non-commercial use only. See the [LICENSE](LICENSE) file for details.
 
 ---
-

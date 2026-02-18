@@ -12,6 +12,8 @@ import jittor as jt
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import build_model
+from models.decoders.decode_head import ConvModule
+from mmseg.registry import MODELS
 from utils.config import load_config
 
 
@@ -80,6 +82,38 @@ class TestDFormerModels(unittest.TestCase):
             
         except Exception as e:
             self.fail(f"Model forward pass failed: {e}")
+
+    def test_mmseg_registry_build_legacy_dformer(self):
+        """Test DFormer legacy segmentor can be built via mmseg registry."""
+        import mmseg.models  # noqa: F401
+        cfg = dict(
+            type='DFormerLegacySegmentor',
+            backbone='DFormer-Tiny',
+            decoder='ham',
+            num_classes=self.num_classes,
+            decoder_embed_dim=512,
+            drop_path_rate=0.1,
+            aux_rate=0.0,
+            pretrained_model=None,
+        )
+
+        try:
+            model = MODELS.build(cfg)
+            model.eval()
+            with jt.no_grad():
+                output = model(self.rgb_input, self.depth_input)
+
+            if isinstance(output, dict):
+                output = output.get('out', output)
+            if isinstance(output, (list, tuple)):
+                output = output[0]
+
+            expected_shape = (self.batch_size, self.num_classes, self.height,
+                              self.width)
+            self.assertEqual(output.shape, expected_shape)
+            print("✓ mmseg registry DFormer legacy build test passed")
+        except Exception as e:
+            self.fail(f"mmseg registry DFormer legacy build failed: {e}")
     
     def test_model_training_mode(self):
         """Test model in training mode."""
@@ -167,15 +201,18 @@ class TestModelVariants(unittest.TestCase):
         
         for backbone in backbones:
             with self.subTest(backbone=backbone):
-                class MockConfig:
-                    backbone = backbone
-                    decoder = 'ham'
-                    decoder_embed_dim = 512
-                    num_classes = 40
-                    drop_path_rate = 0.1
-                    aux_rate = 0.0
-                
-                config = MockConfig()
+                config = type(
+                    'MockConfig',
+                    (),
+                    dict(
+                        backbone=backbone,
+                        decoder='ham',
+                        decoder_embed_dim=512,
+                        num_classes=40,
+                        drop_path_rate=0.1,
+                        aux_rate=0.0,
+                    ),
+                )()
                 
                 try:
                     model = build_model(config)
@@ -193,6 +230,40 @@ class TestModelVariants(unittest.TestCase):
                     
                 except Exception as e:
                     self.fail(f"{backbone} test failed: {e}")
+
+
+class TestDecoderCompat(unittest.TestCase):
+    """Regression tests for decoder-side module compatibility."""
+
+    def setUp(self):
+        jt.flags.use_cuda = 0
+
+    def test_convmodule_bias_auto_and_norm_order(self):
+        """`bias='auto'` should match mmcv semantics for checkpoint parity."""
+        # Norm after conv => conv bias disabled.
+        post_norm = ConvModule(
+            8,
+            16,
+            1,
+            bias='auto',
+            norm_cfg=dict(type='BN'),
+            order=('conv', 'norm', 'act'))
+        self.assertIsNone(post_norm.conv.bias)
+        self.assertEqual(tuple(post_norm.norm.weight.shape), (16, ))
+
+        # Norm before conv => norm channels should match in_channels.
+        pre_norm = ConvModule(
+            8,
+            16,
+            1,
+            bias='auto',
+            norm_cfg=dict(type='BN'),
+            order=('norm', 'conv', 'act'))
+        self.assertEqual(tuple(pre_norm.norm.weight.shape), (8, ))
+
+        # Without norm => conv bias enabled.
+        no_norm = ConvModule(8, 16, 1, bias='auto', norm_cfg=None)
+        self.assertIsNotNone(no_norm.conv.bias)
 
 
 if __name__ == '__main__':

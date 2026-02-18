@@ -7,6 +7,7 @@ import sys
 import unittest
 import numpy as np
 import jittor as jt
+from jittor.dataset import Dataset
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -113,13 +114,12 @@ class TestDataLoading(unittest.TestCase):
             # Test with synthetic data
             dataset = self._create_synthetic_dataset()
             
-            # Create dataloader
-            from jittor.dataset import DataLoader
-            dataloader = DataLoader(
-                dataset,
+            # Create dataloader-like iterator through Dataset.set_attrs
+            dataloader = dataset.set_attrs(
                 batch_size=2,
                 shuffle=True,
-                num_workers=0  # Use 0 for testing
+                num_workers=0,  # Use 0 for testing
+                drop_last=False,
             )
             
             # Test batch loading
@@ -142,8 +142,9 @@ class TestDataLoading(unittest.TestCase):
     
     def _create_synthetic_dataset(self):
         """Create synthetic dataset for testing."""
-        class SyntheticDataset:
+        class SyntheticDataset(Dataset):
             def __init__(self, num_samples=10):
+                super().__init__()
                 self.num_samples = num_samples
                 self.transform = Compose([
                     ToTensor(),

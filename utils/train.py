@@ -93,8 +93,28 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", help="train config file path")
     parser.add_argument("--gpus", default=1, type=int, help="used gpu number")
+    parser.add_argument(
+        "--batch-size-override",
+        default=0,
+        type=int,
+        help="override config batch size when > 0")
+    parser.add_argument(
+        "--num-workers-override",
+        default=-1,
+        type=int,
+        help="override config num_workers when >= 0")
     parser.add_argument("-v", "--verbose", default=False, action="store_true")
     parser.add_argument("--epochs", default=0, type=int)
+    parser.add_argument(
+        "--max-iters",
+        default=0,
+        type=int,
+        help="max train iterations per epoch for smoke/debug (0 means full)")
+    parser.add_argument(
+        "--max-val-iters",
+        default=0,
+        type=int,
+        help="max val iterations for smoke/debug (0 means full)")
     parser.add_argument("--show_image", "-s", default=False, action="store_true")
     parser.add_argument("--save_path", default=None)
     parser.add_argument("--checkpoint_dir")
@@ -133,6 +153,26 @@ def main():
     os.environ['JT_SYNC'] = '0'  # Async execution for better memory management
     
     config = getattr(import_module(args.config), "C")
+    if args.checkpoint_dir:
+        # Allow explicit output root for deterministic training/resume paths.
+        config.log_dir = os.path.abspath(args.checkpoint_dir)
+        os.makedirs(config.log_dir, exist_ok=True)
+        config.log_dir_link = config.log_dir
+        config.tb_dir = os.path.abspath(os.path.join(config.log_dir, "tb"))
+        os.makedirs(config.tb_dir, exist_ok=True)
+        config.checkpoint_dir = os.path.abspath(
+            os.path.join(config.log_dir, "checkpoint"))
+        os.makedirs(config.checkpoint_dir, exist_ok=True)
+        exp_time = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime())
+        config.log_file = os.path.join(config.log_dir, f"log_{exp_time}.log")
+        config.val_log_file = os.path.join(config.log_dir, f"val_{exp_time}.log")
+
+    if args.epochs > 0:
+        config.nepochs = int(args.epochs)
+    if args.batch_size_override > 0:
+        config.batch_size = int(args.batch_size_override)
+    if args.num_workers_override >= 0:
+        config.num_workers = int(args.num_workers_override)
     
     engine = Engine(custom_parser=parser)
     engine.distributed = True if jt.world_size > 1 else False
@@ -140,6 +180,14 @@ def main():
     engine.world_size = jt.world_size
     
     logger = get_logger(config.log_dir, config.log_file, rank=engine.local_rank)
+
+    # Wire explicit resume path into Engine restore flow.
+    if args.continue_fpath:
+        if not os.path.isfile(args.continue_fpath):
+            raise FileNotFoundError(
+                f"continue_fpath not found: {args.continue_fpath}")
+        engine.continue_state_object = args.continue_fpath
+        logger.info(f"resume from checkpoint: {args.continue_fpath}")
     
     if args.pad_SUNRGBD and config.dataset_name != "SUNRGBD":
         args.pad_SUNRGBD = False
@@ -212,7 +260,9 @@ def main():
     else:
         raise NotImplementedError
     
-    total_iteration = config.nepochs * config.niters_per_epoch
+    train_iters_per_epoch = config.niters_per_epoch if args.max_iters <= 0 else min(
+        config.niters_per_epoch, args.max_iters)
+    total_iteration = config.nepochs * train_iters_per_epoch
     lr_policy = WarmUpPolyLR(
         optimizer,
         power=config.lr_power,
@@ -241,9 +291,10 @@ def main():
         
         dataloader = iter(train_loader)
         sum_loss = 0
+        train_iters = train_iters_per_epoch
         
         train_timer.start()
-        for idx in range(config.niters_per_epoch):
+        for idx in range(train_iters):
             engine.update_iteration(epoch, idx)
 
             minibatch = next(dataloader)
@@ -264,7 +315,7 @@ def main():
             
             optimizer.step(loss)
             
-            current_idx = (epoch - 1) * config.niters_per_epoch + idx
+            current_idx = (epoch - 1) * train_iters_per_epoch + idx
             lr_policy.step(current_idx)
             
             if engine.distributed:
@@ -272,7 +323,7 @@ def main():
                 current_lr = optimizer.lr if hasattr(optimizer, 'lr') else lr_policy.get_lr()[0]
                 print_str = (
                     f"Epoch {epoch}/{config.nepochs} "
-                    f"Iter {idx + 1}/{config.niters_per_epoch}: "
+                    f"Iter {idx + 1}/{train_iters}: "
                     f"lr={current_lr:.4e} "
                     f"loss={reduce_loss.item():.4f} total_loss={(sum_loss / (idx + 1)):.4f}"
                 )
@@ -281,11 +332,12 @@ def main():
                 current_lr = optimizer.lr if hasattr(optimizer, 'lr') else lr_policy.get_lr()[0]
                 print_str = (
                     f"Epoch {epoch}/{config.nepochs} "
-                    f"Iter {idx + 1}/{config.niters_per_epoch}: "
+                    f"Iter {idx + 1}/{train_iters}: "
                     f"lr={current_lr:.4e} loss={loss.item():.4f} total_loss={(sum_loss / (idx + 1)):.4f}"
                 )
 
-            if ((idx + 1) % int(config.niters_per_epoch * 0.1) == 0 or idx == 0) and \
+            log_step = max(1, int(train_iters * 0.1))
+            if ((idx + 1) % log_step == 0 or idx == 0) and \
                ((engine.distributed and engine.local_rank == 0) or not engine.distributed):
                 logger.info(print_str)
 
@@ -326,6 +378,8 @@ def main():
                     metric = SegmentationMetric(val_loader.dataset.num_classes)
                     
                     for i, minibatch in enumerate(val_loader):
+                        if args.max_val_iters > 0 and i >= args.max_val_iters:
+                            break
                         rgb = minibatch['data']
                         targets = minibatch['label']
                         modal = minibatch['modal_x']
@@ -340,14 +394,28 @@ def main():
                     all_metrics = metric
                 elif args.mst and epoch > 50:
                     # Use MST only after epoch 50 to avoid slowdown in early training
-                    all_metrics = evaluate_msf(model, val_loader, [0.75, 1.0, 1.25], False, verbose=False)  # Reduced scales and no flip
+                    all_metrics = evaluate_msf(
+                        model,
+                        val_loader,
+                        config=config,
+                        scales=[0.75, 1.0, 1.25],
+                        flip=False,
+                        max_iters=args.max_val_iters,
+                    )  # Reduced scales and no flip
                 elif args.mst and epoch > 20:
                     # Use limited MST after epoch 20
-                    all_metrics = evaluate_msf(model, val_loader, [1.0], False, verbose=False)  # Single scale, no flip
+                    all_metrics = evaluate_msf(
+                        model,
+                        val_loader,
+                        config=config,
+                        scales=[1.0],
+                        flip=False,
+                        max_iters=args.max_val_iters,
+                    )  # Single scale, no flip
                 else:
                     # Use single scale evaluation in early training (much faster)
                     logger.info(f"Starting single-scale evaluation for epoch {epoch}...")
-                    all_metrics = evaluate(model, val_loader, verbose=False)
+                    all_metrics = evaluate(model, val_loader, verbose=False, max_iters=args.max_val_iters)
                     logger.info(f"Evaluation completed for epoch {epoch}")
 
                 if engine.distributed:

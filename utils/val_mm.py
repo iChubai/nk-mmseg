@@ -79,7 +79,7 @@ def slide_inference(model, image, modal_x, config):
     return seg_logits
 
 
-def evaluate(model, data_loader, device=None, verbose=False, save_dir=None, config=None):
+def evaluate(model, data_loader, device=None, verbose=False, save_dir=None, config=None, max_iters=0):
     """Evaluate model on validation dataset."""
     model.eval()
 
@@ -97,7 +97,8 @@ def evaluate(model, data_loader, device=None, verbose=False, save_dir=None, conf
             # Create a fresh iterator to avoid conflicts
             data_iter = iter(data_loader)
 
-            for i in range(len(data_loader)):
+            total_iters = len(data_loader) if max_iters <= 0 else min(len(data_loader), int(max_iters))
+            for i in range(total_iters):
                 try:
                     # Get next batch with timeout protection
                     minibatch = next(data_iter)
@@ -184,7 +185,7 @@ def evaluate(model, data_loader, device=None, verbose=False, save_dir=None, conf
                         jt.clean()
 
                     if verbose or i % 50 == 0:
-                        print(f"Processed batch {i+1}/{len(data_loader)}")
+                        print(f"Processed batch {i+1}/{total_iters}")
 
                 except StopIteration:
                     print(f"Iterator exhausted at batch {i}")
@@ -255,7 +256,18 @@ def slide_inference(model, img, modal_x, config):
     return seg_logits
 
 
-def evaluate_msf(model, data_loader, config=None, device=None, scales=[1.0], flip=False, engine=None, save_dir=None, sliding=False):
+def evaluate_msf(
+    model,
+    data_loader,
+    config=None,
+    device=None,
+    scales=[1.0],
+    flip=False,
+    engine=None,
+    save_dir=None,
+    sliding=False,
+    max_iters=0,
+):
     """Evaluate model with multi-scale and flip augmentation - exact copy of PyTorch version."""
     import math
     model.eval()
@@ -271,11 +283,27 @@ def evaluate_msf(model, data_loader, config=None, device=None, scales=[1.0], fli
     metric = SegmentationMetric(n_classes)
 
     with jt.no_grad():
-        for idx, minibatch in enumerate(data_loader):
+        total_iters = len(data_loader) if max_iters <= 0 else min(len(data_loader), int(max_iters))
+        data_iter = iter(data_loader)
+        default_interval = max(1, total_iters // 10)
+        default_interval = min(default_interval, 50)
+        progress_interval = int(os.environ.get('NKMMSEG_EVAL_PROGRESS_INTERVAL', default_interval))
+        progress_interval = max(1, progress_interval)
+        for idx in range(total_iters):
             # Progress logging similar to PyTorch version
-            if ((idx + 1) % int(len(data_loader) * 0.5) == 0 or idx == 0):
+            if ((idx + 1) % progress_interval == 0 or idx == 0
+                    or (idx + 1) == total_iters):
                 if engine is None or not engine.distributed or engine.local_rank == 0:
-                    print(f"Validation Iter: {idx + 1} / {len(data_loader)}")
+                    print(f"Validation Iter: {idx + 1} / {total_iters}")
+
+            try:
+                minibatch = next(data_iter)
+            except StopIteration:
+                print(f"Iterator exhausted at batch {idx}")
+                break
+            except Exception as e:
+                print(f"Error fetching batch {idx}: {e}")
+                continue
 
             try:
                 images = minibatch['data']

@@ -8,14 +8,15 @@ export CUDA_VISIBLE_DEVICES="0"
 
 # Evaluation configuration
 GPUS=1
-CONFIG="local_configs.NYUDepthv2.DFormer_Large"
+CONFIG="configs/dformer/dformer_large_8xb8-500e_nyudepthv2-480x640.py"
 CHECKPOINT="checkpoints/trained/NYUv2_DFormer_Large.pth"
 
 # Run evaluation using advanced settings to match PyTorch baseline
-python utils/eval.py \
+python tools/test.py \
     --config=$CONFIG \
     --gpus=$GPUS \
-    --continue_fpath=$CHECKPOINT \
+    --checkpoint=$CHECKPOINT \
+    --mode=val \
     --multi_scale \
     --flip \
     --sliding \
@@ -24,37 +25,37 @@ python utils/eval.py \
 # Available configurations and checkpoints:
 
 # NYUv2 DFormers
-# --config=local_configs.NYUDepthv2.DFormer_Large
-# --continue_fpath=checkpoints/trained/NYUv2_DFormer_Large.pkl
-# --config=local_configs.NYUDepthv2.DFormer_Base  
-# --continue_fpath=checkpoints/trained/NYUv2_DFormer_Base.pkl
-# --config=local_configs.NYUDepthv2.DFormer_Small
-# --continue_fpath=checkpoints/trained/NYUv2_DFormer_Small.pkl
-# --config=local_configs.NYUDepthv2.DFormer_Tiny
-# --continue_fpath=checkpoints/trained/NYUv2_DFormer_Tiny.pkl
+# --config=configs/dformer/dformer_large_8xb8-500e_nyudepthv2-480x640.py
+# --checkpoint=checkpoints/trained/NYUv2_DFormer_Large.pth
+# --config=configs/dformer/dformer_base_8xb8-500e_nyudepthv2-480x640.py
+# --checkpoint=checkpoints/trained/NYUv2_DFormer_Base.pth
+# --config=configs/dformer/dformer_small_8xb8-500e_nyudepthv2-480x640.py
+# --checkpoint=checkpoints/trained/NYUv2_DFormer_Small.pth
+# --config=configs/dformer/dformer_tiny_8xb8-500e_nyudepthv2-480x640.py
+# --checkpoint=checkpoints/trained/NYUv2_DFormer_Tiny.pth
 
 # NYUv2 DFormerv2
-# --config=local_configs.NYUDepthv2.DFormerv2_L
-# --continue_fpath=checkpoints/trained/DFormerv2_Large_NYU.pkl
-# --config=local_configs.NYUDepthv2.DFormerv2_B
-# --continue_fpath=checkpoints/trained/DFormerv2_Base_NYU.pkl
-# --config=local_configs.NYUDepthv2.DFormerv2_S
-# --continue_fpath=checkpoints/trained/DFormerv2_Small_NYU.pkl
+# --config=configs/dformer/dformerv2_l_8xb16-500e_nyudepthv2-480x640.py
+# --checkpoint=checkpoints/trained/DFormerv2_Large_NYU.pth
+# --config=configs/dformer/dformerv2_b_8xb16-500e_nyudepthv2-480x640.py
+# --checkpoint=checkpoints/trained/DFormerv2_Base_NYU.pth
+# --config=configs/dformer/dformerv2_s_8xb4-500e_nyudepthv2-480x640.py
+# --checkpoint=checkpoints/trained/DFormerv2_Small_NYU.pth
 
 # SUNRGBD DFormers
-# --config=local_configs.SUNRGBD.DFormer_Large
-# --continue_fpath=checkpoints/trained/SUNRGBD_DFormer_Large.pkl
-# --config=local_configs.SUNRGBD.DFormer_Base
-# --continue_fpath=checkpoints/trained/SUNRGBD_DFormer_Base.pkl
-# --config=local_configs.SUNRGBD.DFormer_Small
-# --continue_fpath=checkpoints/trained/SUNRGBD_DFormer_Small.pkl
-# --config=local_configs.SUNRGBD.DFormer_Tiny
-# --continue_fpath=checkpoints/trained/SUNRGBD_DFormer_Tiny.pkl
+# --config=configs/dformer/dformer_large_8xb16-300e_sunrgbd-480x480.py
+# --checkpoint=checkpoints/trained/SUNRGBD_DFormer_Large.pth
+# --config=configs/dformer/dformer_base_8xb16-300e_sunrgbd-480x480.py
+# --checkpoint=checkpoints/trained/SUNRGBD_DFormer_Base.pth
+# --config=configs/dformer/dformer_small_8xb16-300e_sunrgbd-480x480.py
+# --checkpoint=checkpoints/trained/SUNRGBD_DFormer_Small.pth
+# --config=configs/dformer/dformer_tiny_8xb16-300e_sunrgbd-480x480.py
+# --checkpoint=checkpoints/trained/SUNRGBD_DFormer_Tiny.pth
 
 # SUNRGBD DFormerv2
-# --config=local_configs.SUNRGBD.DFormerv2_L
-# --continue_fpath=checkpoints/trained/DFormerv2_Large_SUNRGBD.pkl
-# --config=local_configs.SUNRGBD.DFormerv2_B
-# --continue_fpath=checkpoints/trained/DFormerv2_Base_SUNRGBD.pkl
-# --config=local_configs.SUNRGBD.DFormerv2_S
-# --continue_fpath=checkpoints/trained/DFormerv2_Small_SUNRGBD.pkl
+# --config=configs/dformer/dformerv2_l_8xb16-300e_sunrgbd-480x480.py
+# --checkpoint=checkpoints/trained/DFormerv2_Large_SUNRGBD.pth
+# --config=configs/dformer/dformerv2_b_8xb16-300e_sunrgbd-480x480.py
+# --checkpoint=checkpoints/trained/DFormerv2_Base_SUNRGBD.pth
+# --config=configs/dformer/dformerv2_s_8xb16-300e_sunrgbd-480x480.py
+# --checkpoint=checkpoints/trained/DFormerv2_Small_SUNRGBD.pth

@@ -8,26 +8,43 @@ from jittor import nn
 import numpy as np
 
 
-def get_class_weight(class_weight):
-    """Get class weight for loss computation.
-    
-    Args:
-        class_weight (list[float] | str | None): If class_weight is a str,
-            take it as a file name and read from it.
+def _to_numpy(data):
+    if isinstance(data, np.ndarray):
+        return data
+    if isinstance(data, jt.Var):
+        return data.numpy()
+    return np.array(data)
+
+
+def get_class_weight(class_weight=None, num_classes=None):
+    """Get class weights.
+
+    Supported modes:
+    - ``class_weight`` is a filepath/list/ndarray/Var of weights.
+    - ``class_weight`` is label tensor/array and ``num_classes`` is provided:
+      compute inverse-frequency weights from labels.
     """
+    if num_classes is not None and class_weight is not None:
+        labels = _to_numpy(class_weight).astype(np.int64)
+        labels = labels.reshape(-1)
+        labels = labels[(labels >= 0) & (labels < int(num_classes))]
+        hist = np.bincount(labels, minlength=int(num_classes)).astype(np.float32)
+        hist = np.maximum(hist, 1.0)
+        inv = hist.sum() / (float(num_classes) * hist)
+        return jt.array(inv).float32()
+
     if isinstance(class_weight, str):
-        # Take it as a file path
         if class_weight.endswith('.npy'):
             class_weight = np.load(class_weight)
         else:
-            # Assume it's a text file with weights
-            with open(class_weight, 'r') as f:
+            with open(class_weight, 'r', encoding='utf-8') as f:
                 class_weight = [float(line.strip()) for line in f]
-    
-    if class_weight is not None:
-        class_weight = jt.array(class_weight).float32()
-        
-    return class_weight
+
+    if class_weight is None:
+        return None
+    if isinstance(class_weight, jt.Var):
+        return class_weight.float32()
+    return jt.array(class_weight).float32()
 
 
 def weight_reduce_loss(loss,
@@ -49,22 +66,22 @@ def weight_reduce_loss(loss,
     if weight is not None:
         loss = loss * weight
 
-    # if avg_factor is not specified, just reduce the loss
+    if reduction == 'none':
+        return loss
+
+    if reduction == 'sum':
+        return loss.sum()
+
+    if reduction != 'mean':
+        raise ValueError(f'Unsupported reduction: {reduction}')
+
     if avg_factor is None:
-        if reduction == 'mean':
-            loss = loss.mean()
-        elif reduction == 'sum':
-            loss = loss.sum()
-    else:
-        # if reduction is mean, then average the loss by avg_factor
-        if reduction == 'mean':
-            # Avoid causing ZeroDivisionError when avg_factor is 0.0,
-            # i.e., all labels of an image belong to ignore index.
-            eps = jt.finfo(jt.float32).eps
-            loss = loss.sum() / (avg_factor + eps)
-        elif reduction == 'sum':
-            loss = loss.sum()
-    return loss
+        return loss.mean()
+
+    eps = jt.finfo(jt.float32).eps
+    if not isinstance(avg_factor, jt.Var):
+        avg_factor = jt.array(float(avg_factor)).float32()
+    return loss.sum() / (avg_factor + eps)
 
 
 def reduce_loss(loss, reduction):
@@ -77,14 +94,13 @@ def reduce_loss(loss, reduction):
     Return:
         jt.Var: Reduced loss tensor.
     """
-    reduction_enum = nn.functional._Reduction.get_enum(reduction)
-    # none: 0, elementwise_mean:1, sum: 2
-    if reduction_enum == 0:
+    if reduction == 'none':
         return loss
-    elif reduction_enum == 1:
+    elif reduction == 'mean':
         return loss.mean()
-    elif reduction_enum == 2:
+    elif reduction == 'sum':
         return loss.sum()
+    raise ValueError(f'Unsupported reduction: {reduction}')
 
 
 def weighted_loss(loss_func):

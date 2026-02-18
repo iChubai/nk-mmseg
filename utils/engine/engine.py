@@ -164,22 +164,55 @@ class Engine(object):
             return
             
         t_start = time.time()
-        if self.distributed:
-            # For distributed training, load on CPU first
-            tmp = jt.load(self.continue_state_object)
-        else:
-            tmp = jt.load(self.continue_state_object)
+        tmp = None
+        load_err = None
+        try:
+            if self.distributed:
+                # For distributed training, load on CPU first
+                tmp = jt.load(self.continue_state_object)
+            else:
+                tmp = jt.load(self.continue_state_object)
+        except Exception as e:
+            load_err = e
         t_ioend = time.time()
-        
-        if 'model' in tmp:
-            self.state.model = load_model(self.state.model, tmp["model"], is_restore=True)
-        if 'optimizer' in tmp:
-            self.state.optimizer.load_state_dict(tmp["optimizer"])
-        if 'epoch' in tmp:
-            self.state.epoch = tmp["epoch"] + 1
-        if 'iteration' in tmp:
-            self.state.iteration = tmp["iteration"]
-        del tmp
+
+        def _is_jittor_optimizer_state(opt_state):
+            # Jittor optimizer states are keyed by "defaults".
+            # PyTorch-style optimizer states are usually {"state", "param_groups"}.
+            return isinstance(opt_state, dict) and ("defaults" in opt_state)
+
+        can_full_resume = isinstance(tmp, dict) and \
+            ("model" in tmp) and _is_jittor_optimizer_state(tmp.get("optimizer"))
+
+        if can_full_resume:
+            if 'model' in tmp:
+                self.state.model = load_model(
+                    self.state.model, tmp["model"], is_restore=True)
+            if 'optimizer' in tmp and self.state.optimizer is not None:
+                self.state.optimizer.load_state_dict(tmp["optimizer"])
+            if 'epoch' in tmp:
+                self.state.epoch = tmp["epoch"] + 1
+            if 'iteration' in tmp:
+                self.state.iteration = tmp["iteration"]
+            del tmp
+        else:
+            # Fallback for model-only checkpoints (e.g., torch-zip .pth):
+            # load model weights and keep optimizer/epoch state unchanged.
+            if load_err is not None:
+                logger.warning(
+                    "jt.load failed for %s, fallback to model-only loader: %s",
+                    self.continue_state_object, str(load_err))
+            else:
+                logger.warning(
+                    "Checkpoint %s is not a training-state dict, fallback to model-only loader.",
+                    self.continue_state_object)
+            self.state.model = load_model(self.state.model,
+                                          self.continue_state_object,
+                                          is_restore=False)
+            logger.info(
+                "Loaded model weights only from %s; optimizer/epoch state not restored.",
+                self.continue_state_object)
+
         t_end = time.time()
         logger.info(
             "Load checkpoint from file {}, Time usage:\n\tIO: {}, restore checkpoint: {}".format(

@@ -389,6 +389,8 @@ def load_state_dict(model, state_dict, strict=True):
     for key, value in state_dict.items():
         if key in model_state_dict:
             try:
+                if not isinstance(value, jt.Var):
+                    value = jt.array(value)
                 model_state_dict[key].assign(value)
             except Exception as e:
                 print(f"Failed to load parameter {key}: {e}")
@@ -402,7 +404,11 @@ def load_state_dict(model, state_dict, strict=True):
         print(f"Unexpected keys: {unexpected_keys}")
     
     if strict and (missing_keys or unexpected_keys):
-        raise RuntimeError(f"Error loading state dict: missing {len(missing_keys)} keys, unexpected {len(unexpected_keys)} keys")
+        raise RuntimeError(
+            f"Error loading state dict: missing {len(missing_keys)} keys, "
+            f"unexpected {len(unexpected_keys)} keys")
+
+    return missing_keys, unexpected_keys
 
 
 def load_checkpoint(model, filename, map_location=None, strict=False, logger=None):
@@ -419,29 +425,14 @@ def load_checkpoint(model, filename, map_location=None, strict=False, logger=Non
         checkpoint: Loaded checkpoint dictionary
     """
     import os
-    import pickle
+    from utils.jt_utils import _load_checkpoint_any, check_runtime_compatibility
 
     if not os.path.exists(filename):
         raise FileNotFoundError(f"Checkpoint file not found: {filename}")
 
     try:
-        if filename.endswith('.pkl'):
-            try:
-                checkpoint = jt.load(filename)
-            except:
-                with open(filename, 'rb') as f:
-                    checkpoint = pickle.load(f)
-        elif filename.endswith('.pth') or filename.endswith('.pt'):
-            try:
-                import torch
-                checkpoint = torch.load(filename, map_location='cpu')
-                checkpoint = _convert_pytorch_checkpoint(checkpoint)
-            except ImportError:
-                with open(filename, 'rb') as f:
-                    checkpoint = pickle.load(f)
-        else:
-            with open(filename, 'rb') as f:
-                checkpoint = pickle.load(f)
+        check_runtime_compatibility(raise_on_error=True)
+        checkpoint, _ = _load_checkpoint_any(filename)
 
         if isinstance(checkpoint, dict):
             if 'state_dict' in checkpoint:

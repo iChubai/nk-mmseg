@@ -27,21 +27,23 @@ def sigmoid_focal_loss(pred,
         reduction (str, optional): The method used to reduce the loss.
         avg_factor (int, optional): Average factor that is used to average the loss.
     """
-    pred_sigmoid = jt.sigmoid(pred)
+    if target.ndim + 1 == pred.ndim and pred.shape[1] == 1:
+        target = target.unsqueeze(1)
+
     target = target.float32()
-    pt = (1 - pred_sigmoid) * target + pred_sigmoid * (1 - target)
-    focal_weight = (alpha * target + (1 - alpha) * (1 - target)) * pt.pow(gamma)
-    loss = nn.binary_cross_entropy_with_logits(pred, target) * focal_weight
-    if weight is not None:
-        if weight.shape != loss.shape:
-            if weight.size(0) == loss.size(0):
-                # For most cases, weight is of shape (num_priors, ),
-                # which is broadcasted to (num_priors, num_classes).
-                weight = weight.view(-1, 1)
-            else:
-                # Sometimes, weight could be of shape (num_priors, num_classes),
-                # and it should be kept as is.
-                assert weight.numel() == loss.numel()
+    pred_sigmoid = jt.sigmoid(pred)
+    pt = pred_sigmoid * target + (1.0 - pred_sigmoid) * (1.0 - target)
+    focal_weight = (alpha * target + (1.0 - alpha) *
+                    (1.0 - target)) * ((1.0 - pt) ** gamma)
+    eps = 1e-12
+    bce = -(target * jt.log(pred_sigmoid + eps) +
+            (1.0 - target) * jt.log(1.0 - pred_sigmoid + eps))
+    loss = bce * focal_weight
+
+    if weight is not None and weight.shape != loss.shape:
+        while weight.ndim < loss.ndim:
+            weight = weight.unsqueeze(-1)
+
     loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
     return loss
 
@@ -212,7 +214,9 @@ def py_sigmoid_focal_loss(pred,
     target = target.float32()
     pt = (1 - pred_sigmoid) * target + pred_sigmoid * (1 - target)
     focal_weight = (alpha * target + (1 - alpha) * (1 - target)) * pt.pow(gamma)
-    loss = nn.binary_cross_entropy_with_logits(
-        pred, target, reduction='none') * focal_weight
+    eps = 1e-12
+    bce = -(target * jt.log(pred_sigmoid + eps) +
+            (1.0 - target) * jt.log(1.0 - pred_sigmoid + eps))
+    loss = bce * focal_weight
     loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
     return loss
